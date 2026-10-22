@@ -31,6 +31,41 @@ button.secondary{background:#2c3a30;color:white}
 #hint{color:var(--muted);font-size:14px;min-height:20px}
 footer{text-align:center;color:var(--muted);padding:20px;font-size:13px}
 </style>
+
+<style id="leo-chess-3d">
+/* LEO_CHESS_3D_V1 */
+#board {
+  perspective: 900px;
+  transform-style: preserve-3d;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow:
+    0 10px 0 rgba(0,0,0,.28),
+    0 18px 30px rgba(0,0,0,.25);
+}
+#board .square {
+  transition: filter .15s ease, box-shadow .15s ease;
+  transform: translateZ(0);
+  -webkit-tap-highlight-color: transparent;
+}
+#board .square:not(.light):not(.dark) {
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.06);
+}
+#board .square:active {
+  filter: brightness(1.16);
+}
+#board .square.selected {
+  box-shadow:
+    inset 0 0 0 4px #ffdf57,
+    inset 0 0 14px rgba(255,223,87,.5),
+    0 0 8px rgba(255,223,87,.3);
+  z-index: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  #board .square { transition: none; }
+}
+</style>
+
 </head>
 <body>
 <header>
