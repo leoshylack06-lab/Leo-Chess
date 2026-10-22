@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#101713">
+<title>Leo Chess</title>
+<style>
+:root{color-scheme:dark;--bg:#101713;--panel:#1b2620;--green:#b9e769;--text:#f1f5ed;--muted:#a8b6aa}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,sans-serif}
+header{padding:20px;text-align:center;border-bottom:1px solid #344238}
+h1{margin:0;color:var(--green);font-size:30px}
+header p{margin:6px 0;color:var(--muted)}
+main{width:min(100% - 24px,520px);margin:20px auto}
+.panel{background:var(--panel);border:1px solid #35443a;border-radius:16px;padding:16px;margin-bottom:16px}
+h2{font-size:18px;margin:0 0 12px}
+.controls{display:flex;gap:8px;flex-wrap:wrap}
+input,button{font:inherit;border-radius:10px;padding:12px;border:1px solid #526254}
+input{background:#101713;color:white;min-width:0;flex:1;width:100px}
+button{background:var(--green);color:#172011;font-weight:700;cursor:pointer}
+button.secondary{background:#2c3a30;color:white}
+#status{font-weight:700;color:var(--green);margin:8px 0}
+#room{color:var(--muted);overflow-wrap:anywhere}
+#board{display:grid;grid-template-columns:repeat(8,1fr);width:100%;aspect-ratio:1;border:3px solid #39473d;border-radius:5px;overflow:hidden}
+.square{border:0;border-radius:0;padding:0;display:flex;align-items:center;justify-content:center;aspect-ratio:1;font-size:clamp(25px,8vw,45px);line-height:1;position:relative}
+.light{background:#e9eddf;color:#182018}
+.dark{background:#71966d;color:#182018}
+.square.selected{box-shadow:inset 0 0 0 4px #ffdf57}
+.square:focus-visible{outline:3px solid #fff;outline-offset:-4px}
+#hint{color:var(--muted);font-size:14px;min-height:20px}
+footer{text-align:center;color:var(--muted);padding:20px;font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <h1>♟ Leo Chess</h1>
+  <p>One world. One board. Your next move.</p>
+</header>
+<main>
+  <section class="panel">
+    <h2>Play online</h2>
+    <div class="controls">
+      <button id="create">Create a room</button>
+    </div>
+    <p style="color:var(--muted)">Or join a friend's room:</p>
+    <div class="controls">
+      <input id="codeInput" maxlength="6" placeholder="6-character room code" aria-label="Room code">
+      <button id="join" class="secondary">Join</button>
+    </div>
+    <p id="room">Not in a game yet.</p>
+    <p id="status">Connect to start playing.</p>
+    <p id="hint">Create a room and share its code with a friend.</p>
+  </section>
+  <section class="panel">
+    <h2 id="boardTitle">Your chessboard</h2>
+    <div id="board" aria-label="Chessboard"></div>
+    <div class="controls" style="margin-top:12px">
+      <button id="copy" class="secondary">Copy room code</button>
+      <button id="export" class="secondary">Export game</button>
+    </div>
+  </section>
+  <section class="panel">
+    <h2>How to play</h2>
+    <p style="color:var(--muted);line-height:1.6">
+      Create a room to play White, then send the code to your opponent.
+      They join as Black. Tap a piece and then its destination square.
+      Promotions automatically choose a queen.
+    </p>
+  </section>
+</main>
+<footer>Leo Chess · Free to play · Prototype v0.1</footer>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+const $ = id => document.getElementById(id);
+const board = $("board");
+const files = "abcdefgh";
+const glyphs = {
+  w:{k:"♔",q:"♕",r:"♖",b:"♗",n:"♘",p:"♙"},
+  b:{k:"♚",q:"♛",r:"♜",b:"♝",n:"♞",p:"♟"}
+};
+let game = null;
+let roomCode = "";
+let myColor = null;
+let selected = null;
+let latestPGN = "";
+
+function say(message) { $("hint").textContent = message; }
+
+function showBoard() {
+  board.replaceChildren();
+  const cells = Array(64).fill(null);
+
+  if (game) {
+    const rows = game.split(" ")[0].split("/");
+    rows.forEach((row, r) => {
+      let c = 0;
+      for (const ch of row) {
+        if (/[1-8]/.test(ch)) {
+          c += Number(ch);
+        } else {
+          cells[r * 8 + c] = ch;
+          c++;
+        }
+      }
+    });
+  }
+
+  for (let i = 0; i < 64; i++) {
+    const r = Math.floor(i / 8);
+    const c = i % 8;
+    const name = files[c] + (8 - r);
+    const piece = cells[i];
+    const square = document.createElement("button");
+    square.className = "square " +
+      ((r + c) % 2 === 0 ? "light" : "dark");
+
+    if (selected === name) square.classList.add("selected");
+    if (piece) {
+      const color = piece === piece.toUpperCase() ? "w" : "b";
+      square.textContent = glyphs[color][piece.toLowerCase()];
+    }
+
+    square.setAttribute("aria-label", name);
+    square.addEventListener("click", () => clickSquare(name, piece));
+    board.appendChild(square);
+  }
+}
+function clickSquare(squareName,piece) {
+  if(!roomCode||!game||!myColor)return;
+  const turn=game.split(" ")[1];
+  if(turn!==myColor){say("Wait for your turn.");return;}
+
+  if(selected){
+    if(selected===squareName){selected=null;showBoard();return;}
+    socket.emit("makeMove",{
+      code:roomCode,from:selected,to:squareName,promotion:"q"
+    },result=>{
+      if(!result?.ok)say(result?.error||"Move failed.");
+      else say("Move sent.");
+    });
+    selected=null;
+    return;
+  }
+
+  if(piece && (piece===piece.toUpperCase()?"w":"b")===myColor){
+    selected=squareName;
+    showBoard();
+    say("Select a destination square.");
+  } else {
+    say("Select one of your own pieces.");
+  }
+}
+
+socket.on("connect",()=>say("Connected. Create a room to begin."));
+socket.on("disconnect",()=>say("Connection lost. Reconnecting…"));
+
+socket.on("state",state=>{
+  roomCode=state.code;
+  myColor=state.color;
+  game=state.fen;
+  latestPGN=state.pgn;
+  selected=null;
+  $("room").textContent="Room: "+state.code+" · You play "+(myColor==="w"?"White":"Black");
+  $("status").textContent=state.status;
+  $("boardTitle").textContent="Chessboard · "+(myColor==="w"?"White":"Black");
+  if(!state.players.white||!state.players.black){
+    say("Waiting for the second player. Share your room code!");
+  } else {
+    say("Both players connected. Good luck!");
+  }
+  showBoard();
+});
+
+$("create").addEventListener("click",()=>{
+  socket.emit("createRoom",result=>{
+    if(!result?.ok)say("Could not create a room.");
+    else {$("codeInput").value=result.code;say("Room created. Share the code!");}
+  });
+});
+
+$("join").addEventListener("click",()=>{
+  const code=$("codeInput").value.trim().toUpperCase();
+  if(!code){say("Enter a room code first.");return;}
+  socket.emit("joinRoom",code,result=>{
+    if(!result?.ok)say(result?.error||"Could not join.");
+  });
+});
+
+$("copy").addEventListener("click",async()=>{
+  if(!roomCode){say("Create or join a room first.");return;}
+  try{
+    await navigator.clipboard.writeText(roomCode);
+    say("Room code copied: "+roomCode);
+  }catch{
+    $("codeInput").value=roomCode;
+    say("Your room code is "+roomCode+". Copy it from the field.");
+  }
+});
+
+$("export").addEventListener("click",()=>{
+  if(!latestPGN){say("Play a move first to export your game.");return;}
+  const blob=new Blob([latestPGN],{type:"text/plain"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;a.download="leo-chess-game.pgn";a.click();
+  URL.revokeObjectURL(url);
+});
+
+showBoard();
+</script>
+</body>
+</html>
+<style>
+header h1 {
+  letter-spacing: 2px;
+  background: linear-gradient(90deg,#e9c76c,#c8ed83);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+header {
+  background: linear-gradient(180deg,#152219,#101713);
+}
+button {
+  transition: filter .15s ease, transform .15s ease;
+}
+button:hover {
+  filter: brightness(1.12);
+}
+button:active {
+  transform: scale(.98);
+}
+.panel {
+  box-shadow: 0 8px 28px #00000022;
+}
+</style>
