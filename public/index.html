@@ -304,3 +304,27 @@ html[data-board-theme="neon"] #board .light { background:#c9c3ff; }
 html[data-board-theme="neon"] #board .dark { background:#493b85; }
 html[data-board-theme="neon"] #board { border-color:#9a83ff; }
 </style>
+
+<style id="leo-chess-pieces-3d">
+/* LEO_CHESS_PIECES_3D_V1 */
+#board .square {
+  position: relative;
+  font-size: clamp(27px, 7vw, 48px);
+  line-height: 1;
+  text-shadow:
+    0 1px 0 rgba(255,255,255,.25),
+    0 2px 0 rgba(0,0,0,.25),
+    0 4px 4px rgba(0,0,0,.35);
+  transition: filter .15s ease, transform .15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+#board .square:active {
+  filter: brightness(1.15);
+  transform: translateY(1px);
+}
+#board .square.selected {
+  text-shadow:
+    0 1px 0 rgba(255,255,255,.35),
+    0 3px 4px rgba(0,0,0,.4);
+}
+</style>
