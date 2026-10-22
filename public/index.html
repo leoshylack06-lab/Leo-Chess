@@ -54,6 +54,13 @@ footer{text-align:center;color:var(--muted);padding:20px;font-size:13px}
   </section>
   <section class="panel">
     <h2 id="boardTitle">Your chessboard</h2>
+    <label for="boardTheme">Choose your board style</label>
+    <select id="boardTheme" style="width:100%;margin:10px 0;padding:12px;border-radius:10px;background:#101713;color:white">
+      <option value="classic">Classic green</option>
+      <option value="wood">Warm wood</option>
+      <option value="blue">Ocean blue</option>
+      <option value="neon">Neon night</option>
+    </select>
     <div id="board" aria-label="Chessboard"></div>
     <div class="controls" style="margin-top:12px">
       <button id="copy" class="secondary">Copy room code</button>
@@ -76,6 +83,16 @@ footer{text-align:center;color:var(--muted);padding:20px;font-size:13px}
 const socket = io();
 const $ = id => document.getElementById(id);
 const board = $("board");
+const themeKey = "leoChessBoardTheme";
+const savedTheme = localStorage.getItem(themeKey) || "classic";
+document.documentElement.dataset.boardTheme = savedTheme;
+$("boardTheme").value = savedTheme;
+
+$("boardTheme").addEventListener("change", () => {
+  const theme = $("boardTheme").value;
+  document.documentElement.dataset.boardTheme = theme;
+  localStorage.setItem(themeKey, theme);
+});
 const files = "abcdefgh";
 const glyphs = {
   w:{k:"♔",q:"♕",r:"♖",b:"♗",n:"♘",p:"♙"},
@@ -236,4 +253,19 @@ button:active {
 .panel {
   box-shadow: 0 8px 28px #00000022;
 }
+</style>
+
+<style>
+html[data-board-theme="classic"] #board .light { background:#e9eddf; }
+html[data-board-theme="classic"] #board .dark { background:#71966d; }
+
+html[data-board-theme="wood"] #board .light { background:#f0d9b5; }
+html[data-board-theme="wood"] #board .dark { background:#a66b3d; }
+
+html[data-board-theme="blue"] #board .light { background:#dceaf5; }
+html[data-board-theme="blue"] #board .dark { background:#4c82ad; }
+
+html[data-board-theme="neon"] #board .light { background:#c9c3ff; }
+html[data-board-theme="neon"] #board .dark { background:#493b85; }
+html[data-board-theme="neon"] #board { border-color:#9a83ff; }
 </style>
