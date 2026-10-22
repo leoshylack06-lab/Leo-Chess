@@ -43,6 +43,8 @@ function sendState(code) {
       color,
       fen: room.game.fen(),
       pgn: room.game.pgn(),
+      ply: room.game.history().length,
+      lastMove: room.lastMove || null,
       status: status(room),
       players: {
         white: Boolean(room.players.w),
@@ -115,11 +117,22 @@ io.on("connection", (socket) => {
     }
 
     try {
-      room.game.move({
+      const move = room.game.move({
         from: data.from,
         to: data.to,
         promotion: data.promotion || "q"
       });
+
+      // LEO_CHESS_MOVE_FEEDBACK
+      room.lastMove = {
+        from: move.from,
+        to: move.to,
+        capture: Boolean(move.captured),
+        check: room.game.isCheck(),
+        mate: room.game.isCheckmate(),
+        ply: room.game.history().length
+      };
+
       callback({ ok: true });
       sendState(code);
     } catch {

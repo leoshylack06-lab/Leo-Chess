@@ -209,11 +209,24 @@ function clickSquare(squareName,piece) {
 socket.on("connect",()=>say("Connected. Create a room to begin."));
 socket.on("disconnect",()=>say("Connection lost. Reconnecting…"));
 
+// LEO_CHESS_STATE_FEEDBACK_V1
+let leoLastPly = null;
 socket.on("state",state=>{
   roomCode=state.code;
   myColor=state.color;
   game=state.fen;
   latestPGN=state.pgn;
+    if (leoLastPly === null) {
+      leoLastPly = state.ply ?? 0;
+    } else if (typeof state.ply === "number" && state.ply > leoLastPly) {
+      const move = state.lastMove;
+      if (move) {
+        leoFeedback.play(move.mate ? "mate" :
+          move.check ? "check" :
+          move.capture ? "capture" : "move");
+      }
+      leoLastPly = state.ply;
+    }
   selected=null;
   $("room").textContent="Room: "+state.code+" · You play "+(myColor==="w"?"White":"Black");
   $("status").textContent=state.status;
@@ -263,6 +276,63 @@ $("export").addEventListener("click",()=>{
 
 showBoard();
 </script>
+
+<script>
+/* LEO_CHESS_FEEDBACK_V1 */
+
+function leoTestVibration() {
+  if (!("vibrate" in navigator)) {
+    alert("Vibration is not supported by this browser. Try Chrome on Android.");
+    return;
+  }
+  const result = navigator.vibrate([150, 80, 150]);
+  if (!result) {
+    alert("The browser rejected vibration. Check Android vibration settings and browser permissions.");
+  }
+}
+
+const leoFeedback = (() => {
+  let audio;
+  const settings = { sound: true, vibration: true };
+
+  function tone(freq, duration, volume = 0.045) {
+    try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return;
+      audio ||= new AudioContextClass();
+      if (audio.state === 'suspended') audio.resume();
+      const osc = audio.createOscillator();
+      const gain = audio.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(volume, audio.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(audio.destination);
+      osc.start();
+      osc.stop(audio.currentTime + duration);
+    } catch (_) {}
+  }
+
+  return {
+    play(type) {
+      if (settings.sound) {
+        if (type === 'capture') { tone(260, .12); setTimeout(() => tone(180, .10), 65); }
+        else if (type === 'check') { tone(680, .16); }
+        else if (type === 'mate') { tone(740, .16); setTimeout(() => tone(520, .22), 130); }
+        else { tone(420, .075); }
+      }
+      if (settings.vibration && navigator.vibrate) {
+        navigator.vibrate(type === 'mate' ? [70, 45, 100] : type === 'capture' ? [45, 25, 45] : 25);
+      }
+    },
+    toggleSound(value) { settings.sound = value; },
+    toggleVibration(value) { settings.vibration = value; }
+  };
+})();
+</script>
+
+<button id="leo-vibration-test" onclick="leoTestVibration()" style="position:relative;z-index:9999;margin:12px;padding:12px">Test vibration</button>
 </body>
 </html>
 <style>
