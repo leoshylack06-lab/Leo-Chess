@@ -83,6 +83,16 @@ footer{text-align:center;color:var(--muted);padding:20px;font-size:13px}
       <input id="codeInput" maxlength="6" placeholder="6-character room code" aria-label="Room code">
       <button id="join" class="secondary">Join</button>
     </div>
+    <hr style="margin:20px 0;border-color:var(--muted)">
+    <h2>Play vs AI</h2>
+    <label for="aiDifficulty">AI difficulty</label>
+    <select id="aiDifficulty" style="width:100%;margin:10px 0;padding:12px;border-radius:10px;background:#101713;color:white">
+      <option value="easy">Easy</option>
+      <option value="medium" selected>Medium</option>
+      <option value="hard">Hard</option>
+      <option value="expert">Expert</option>
+    </select>
+    <button id="startAI" class="secondary">Start AI game</button>
     <p id="room">Not in a game yet.</p>
     <p id="status">Connect to start playing.</p>
     <p id="hint">Create a room and share its code with a friend.</p>
@@ -180,8 +190,46 @@ function showBoard() {
     board.appendChild(square);
   }
 }
+let gameMode = "online";
+let aiThinking = false;
+
 function clickSquare(squareName,piece) {
-  if(!roomCode||!game||!myColor)return;
+  if (!game || !myColor) return;
+
+  if (gameMode === "ai") {
+    if (aiThinking) {
+      say("Stockfish is thinking...");
+      return;
+    }
+    if (game.split(" ")[1] !== "w") {
+      say("Wait for Stockfish to move.");
+      return;
+    }
+    if (selected) {
+      if (selected === squareName) {
+        selected = null;
+        showBoard();
+        return;
+      }
+      const from = selected;
+      selected = null;
+      showBoard();
+      socket.emit("aiMove", {from, to: squareName, promotion: "q"}, result => {
+        if (!result?.ok) say(result?.error || "Move failed.");
+      });
+      return;
+    }
+    if (piece && piece === piece.toUpperCase()) {
+      selected = squareName;
+      showBoard();
+      say("Select a destination square.");
+    } else {
+      say("Select one of your white pieces.");
+    }
+    return;
+  }
+
+  if (!roomCode || !myColor) return;
   const turn=game.split(" ")[1];
   if(turn!==myColor){say("Wait for your turn.");return;}
 
@@ -207,11 +255,55 @@ function clickSquare(squareName,piece) {
 }
 
 socket.on("connect",()=>say("Connected. Create a room to begin."));
+
+$("startAI").addEventListener("click", () => {
+  gameMode = "ai";
+  aiThinking = false;
+  roomCode = "";
+  myColor = "w";
+  game = null;
+  selected = null;
+  latestPGN = "";
+  $("room").textContent = "Starting AI game...";
+  $("status").textContent = "Preparing Stockfish";
+  $("boardTitle").textContent = "Leo Chess · You vs Stockfish";
+  say("Starting a new AI game...");
+  showBoard();
+
+  socket.emit("startAI", $("aiDifficulty").value, result => {
+    if (!result?.ok) say(result?.error || "Could not start the AI game.");
+  });
+});
+
+socket.on("aiState", state => {
+  if (gameMode !== "ai") return;
+  game = state.fen;
+  latestPGN = state.pgn || "";
+  aiThinking = Boolean(state.thinking);
+  selected = null;
+
+  $("room").textContent = "Stockfish · " + String(state.difficulty || "").toUpperCase();
+  $("status").textContent = state.status;
+  $("boardTitle").textContent = "Leo Chess · You vs Stockfish";
+
+  if (state.gameOver) say("Game finished. Start a new AI game to play again.");
+  else if (aiThinking) say("Stockfish is thinking...");
+  else if (game.split(" ")[1] === "w") say("Your turn. Select a white piece.");
+  else say("Stockfish to move.");
+
+  showBoard();
+});
+
+socket.on("aiError", message => {
+  if (gameMode === "ai") say(String(message));
+});
 socket.on("disconnect",()=>say("Connection lost. Reconnecting…"));
 
 // LEO_CHESS_STATE_FEEDBACK_V1
 let leoLastPly = null;
 socket.on("state",state=>{
+  if (gameMode === "ai") return;
+  gameMode = "online";
   roomCode=state.code;
   myColor=state.color;
   game=state.fen;
@@ -240,6 +332,7 @@ socket.on("state",state=>{
 });
 
 $("create").addEventListener("click",()=>{
+  gameMode = "online";
   socket.emit("createRoom",result=>{
     if(!result?.ok)say("Could not create a room.");
     else {$("codeInput").value=result.code;say("Room created. Share the code!");}
@@ -247,6 +340,7 @@ $("create").addEventListener("click",()=>{
 });
 
 $("join").addEventListener("click",()=>{
+  gameMode = "online";
   const code=$("codeInput").value.trim().toUpperCase();
   if(!code){say("Enter a room code first.");return;}
   socket.emit("joinRoom",code,result=>{

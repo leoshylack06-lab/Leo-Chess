@@ -3,6 +3,7 @@ const http = require("node:http");
 const { Server } = require("socket.io");
 const { Chess } = require("chess.js");
 const crypto = require("node:crypto");
+const { bestMove } = require("./stockfish-engine");
 
 const app = express();
 const server = http.createServer(app);
@@ -54,7 +55,124 @@ function sendState(code) {
   }
 }
 
+
+function sendAIState(socket) {
+  const session = socket.data.aiGame;
+  if (!session) return;
+
+  const game = session.game;
+  const status = game.isCheckmate()
+    ? `Checkmate! ${game.turn() === "w" ? "Black" : "White"} wins.`
+    : game.isDraw() ? "Game drawn."
+    : game.isCheck() ? "Check!"
+    : `${game.turn() === "w" ? "White" : "Black"} to move`;
+
+  socket.emit("aiState", {
+    fen: game.fen(),
+    pgn: game.pgn(),
+    ply: game.history().length,
+    status: session.thinking ? "Stockfish is thinking..." : status,
+    difficulty: session.difficulty,
+    thinking: session.thinking,
+    gameOver: game.isGameOver(),
+    lastMove: session.lastMove
+  });
+}
+
 io.on("connection", (socket) => {
+  socket.on("startAI", (difficulty, callback) => {
+    const levels = {
+      easy: { skill: 0, depth: 2 },
+      medium: { skill: 5, depth: 4 },
+      hard: { skill: 10, depth: 6 },
+      expert: { skill: 15, depth: 8 }
+    };
+
+    const level = levels[String(difficulty || "medium").toLowerCase()];
+    if (!level) {
+      if (typeof callback === "function") callback({ ok: false, error: "Invalid difficulty." });
+      return;
+    }
+
+    socket.data.aiGame = {
+      game: new Chess(),
+      level,
+      difficulty: String(difficulty || "medium").toLowerCase(),
+      thinking: false,
+      lastMove: null
+    };
+
+    if (typeof callback === "function") callback({ ok: true });
+    sendAIState(socket);
+  });
+
+  socket.on("aiMove", async (data, callback) => {
+    const reply = typeof callback === "function" ? callback : () => {};
+    const session = socket.data.aiGame;
+
+    if (!session) return reply({ ok: false, error: "Start an AI game first." });
+    if (session.thinking) return reply({ ok: false, error: "AI is thinking." });
+    if (session.game.isGameOver()) return reply({ ok: false, error: "Game over." });
+    if (session.game.turn() !== "w") return reply({ ok: false, error: "Wait for the AI." });
+
+    let move;
+    try {
+      move = session.game.move({
+        from: data.from,
+        to: data.to,
+        promotion: data.promotion || "q"
+      });
+    } catch {
+      return reply({ ok: false, error: "Illegal move." });
+    }
+
+    session.lastMove = {
+      from: move.from, to: move.to,
+      capture: Boolean(move.captured),
+      check: session.game.isCheck(),
+      mate: session.game.isCheckmate()
+    };
+
+    reply({ ok: true });
+    sendAIState(socket);
+
+    if (session.game.isGameOver()) return;
+
+    session.thinking = true;
+    sendAIState(socket);
+
+    try {
+      const uci = await bestMove(
+        session.game.fen(),
+        session.level.skill,
+        session.level.depth
+      );
+
+      if (socket.data.aiGame !== session) return;
+
+      const aiMove = session.game.move({
+        from: uci.slice(0, 2),
+        to: uci.slice(2, 4),
+        promotion: uci[4] || "q"
+      });
+
+      session.lastMove = {
+        from: aiMove.from, to: aiMove.to,
+        capture: Boolean(aiMove.captured),
+        check: session.game.isCheck(),
+        mate: session.game.isCheckmate()
+      };
+    } catch (error) {
+      console.error("AI move failed:", error.message);
+      socket.emit("aiError", "The AI could not move. Restart the game.");
+    } finally {
+      if (socket.data.aiGame === session) {
+        session.thinking = false;
+        sendAIState(socket);
+      }
+    }
+  });
+
   socket.on("createRoom", (callback) => {
     const code = makeCode();
     const room = {
